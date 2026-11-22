@@ -1,0 +1,756 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- SEO -->
+    <title>TransitEase | Public Transportation & Route Assistance</title>
+
+    <meta name="description" content="TransitEase helps you discover nearby bus stops, metro stations, railway stations, public transportation facilities and travel options in Bengaluru.">
+
+    <meta name="keywords" content="TransitEase, public transport Bengaluru, bus stops, metro stations, railway stations, transport route finder, Bengaluru travel">
+
+    <meta name="author" content="TransitEase Team">
+
+    <!-- Replace this with your actual Google Search Console verification code -->
+    <meta name="google-site-verification" content="YOUR_VERIFICATION_CODE">
+
+    <!-- Leaflet Map CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+:root {
+    --green: #176b48;
+    --green-dark: #104a32;
+    --green-soft: #e9f4ed;
+    --text: #202923;
+    --muted: #778179;
+    --border: #e9ece9;
+    --white: #ffffff;
+    --shadow: 0 8px 30px rgba(22,39,29,.10);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: "Inter", sans-serif;
+    color: var(--text);
+    background: #f5f7f5;
+    overflow: hidden;
+}
+
+button, input {
+    font-family: inherit;
+}
+
+button {
+    cursor: pointer;
+}
+
+.app {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* NAVBAR */
+
+.topbar {
+    height: 70px;
+    background: white;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 30px;
+    z-index: 1000;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    font-size: 21px;
+    font-weight: 800;
+    letter-spacing: -.8px;
+    color: var(--green-dark);
+    text-decoration: none;
+}
+
+.brand-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    background: var(--green);
+    color: white;
+    display: grid;
+    place-items: center;
+    font-size: 21px;
+}
+
+.brand-highlight {
+    color: #70a98a;
+}
+
+.topnav {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+}
+
+.topnav a {
+    text-decoration: none;
+    color: #68736b;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.topnav a:hover {
+    color: var(--green);
+}
+
+.top-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.city-pill {
+    padding: 9px 14px;
+    border: 1px solid var(--border);
+    border-radius: 30px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #47564b;
+    background: white;
+}
+
+.city-pill span {
+    color: var(--green);
+    margin-right: 6px;
+}
+
+.help-button {
+    background: var(--green-soft);
+    color: var(--green);
+    border: none;
+    padding: 10px 15px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+/* MAP */
+
+.main {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+
+#map {
+    width: 100%;
+    height: 100%;
+    background: #e8ece7;
+}
+
+/* SIDEBAR */
+
+.sidebar {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    bottom: 20px;
+    width: 390px;
+    background: white;
+    border-radius: 20px;
+    box-shadow: 0 12px 45px rgba(20,35,25,.15);
+    z-index: 500;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-scroll {
+    padding: 24px;
+    overflow-y: auto;
+}
+
+.welcome {
+    margin-bottom: 22px;
+}
+
+.welcome-tag {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    font-weight: 800;
+    color: var(--green);
+}
+
+.welcome h1 {
+    font-size: 27px;
+    letter-spacing: -1px;
+    line-height: 1.3;
+    margin-top: 10px;
+}
+
+.welcome p {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--muted);
+    margin-top: 8px;
+}
+
+/* SEARCH BOX */
+
+.search-box {
+    border: 1px solid var(--border);
+    border-radius: 15px;
+    padding: 17px;
+    background: white;
+}
+
+.field {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.field-icon {
+    width: 34px;
+    height: 34px;
+    flex-shrink: 0;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+}
+
+.from-icon {
+    background: #e9f5ec;
+    color: #278151;
+}
+
+.to-icon {
+    background: #fff2df;
+    color: #d18b35;
+}
+
+.field-content {
+    flex: 1;
+}
+
+.field-content label {
+    display: block;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: #89928b;
+    margin-bottom: 5px;
+}
+
+.field-content input {
+    width: 100%;
+    border: none;
+    outline: none;
+    font-size: 13px;
+    color: var(--text);
+    background: transparent;
+}
+
+.field-content input::placeholder {
+    color: #a3aaa4;
+}
+
+.vertical-line {
+    height: 22px;
+    border-left: 2px dotted #d6ded7;
+    margin: 3px 0 3px 16px;
+}
+
+.search-button {
+    width: 100%;
+    border: none;
+    background: var(--green);
+    color: white;
+    height: 46px;
+    border-radius: 11px;
+    font-weight: 700;
+    font-size: 13px;
+    margin-top: 17px;
+    transition: .2s;
+}
+
+.search-button:hover {
+    background: var(--green-dark);
+}
+
+.search-button span {
+    margin-left: 8px;
+}
+
+/* TRANSPORT OPTIONS */
+
+.transport-heading {
+    margin: 27px 0 13px;
+}
+
+.transport-heading h2 {
+    font-size: 15px;
+    font-weight: 750;
+}
+
+.transport-heading p {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 5px;
+}
+
+.transport-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.transport-option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    transition: .2s;
+    background: white;
+}
+
+.transport-option:hover {
+    background: #f8fbf8;
+    border-color: #cbded0;
+    transform: translateY(-1px);
+}
+
+.transport-option button {
+    border: none;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    text-align: left;
+    width: 100%;
+    gap: 12px;
+}
+
+.option-icon {
+    width: 43px;
+    height: 43px;
+    display: grid;
+    place-items: center;
+    border-radius: 12px;
+    font-size: 21px;
+    flex-shrink: 0;
+}
+
+.bus-bg {
+    background: #eaf5eb;
+}
+
+.metro-bg {
+    background: #eaf0fa;
+}
+
+.rail-bg {
+    background: #fff3e4;
+}
+
+.option-info {
+    flex: 1;
+}
+
+.option-info strong {
+    display: block;
+    font-size: 13px;
+    margin-bottom: 3px;
+}
+
+.option-info span {
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.option-arrow {
+    color: #99a39b;
+    font-size: 18px;
+}
+
+/* RESULTS */
+
+#route-result,
+#transport-result {
+    margin-top: 14px;
+}
+
+.result-card {
+    background: #F7FAF7;
+    border: 1px solid #E5ECE5;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 12px;
+    font-size: 12px;
+}
+
+.result-card h3 {
+    font-size: 14px;
+    margin-bottom: 10px;
+    color: var(--green-dark);
+}
+
+.result-card p {
+    margin: 6px 0;
+    line-height: 1.6;
+    color: #647168;
+}
+
+.result-card ul {
+    padding-left: 18px;
+    margin-top: 10px;
+}
+
+.result-card li {
+    margin-bottom: 7px;
+    line-height: 1.5;
+}
+
+.route-note {
+    background: #edf5ef;
+    color: #4c6653;
+    border-radius: 8px;
+    padding: 10px;
+    margin: 10px 0;
+    line-height: 1.6;
+}
+
+.result-card a {
+    display: inline-block;
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: 9px;
+    background: var(--green);
+    color: white;
+    text-decoration: none;
+}
+
+/* FOOTER */
+
+.sidebar-footer {
+    padding: 14px 22px;
+    border-top: 1px solid var(--border);
+    background: #fbfcfb;
+    font-size: 10px;
+    color: #879188;
+}
+
+.sidebar-footer strong {
+    color: var(--green);
+}
+
+/* MAP CONTROLS */
+
+.map-controls {
+    position: absolute;
+    right: 20px;
+    top: 20px;
+    z-index: 400;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.map-control {
+    width: 43px;
+    height: 43px;
+    border: none;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 3px 15px rgba(0,0,0,.12);
+    font-size: 18px;
+    color: #35443a;
+}
+
+.map-control:hover {
+    background: #f0f6f1;
+}
+
+.map-attribution {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    z-index: 400;
+    background: rgba(255,255,255,.88);
+    font-size: 10px;
+    padding: 5px 9px;
+}
+
+/* MOBILE */
+
+@media (max-width: 850px) {
+    .topnav {
+        display: none;
+    }
+
+    .sidebar {
+        width: 350px;
+    }
+}
+
+@media (max-width: 600px) {
+    body {
+        overflow: auto;
+    }
+
+    .app {
+        min-height: 100vh;
+        height: auto;
+    }
+
+    .topbar {
+        height: 62px;
+        padding: 0 15px;
+    }
+
+    .brand {
+        font-size: 18px;
+    }
+
+    .city-pill {
+        font-size: 10px;
+        padding: 8px 10px;
+    }
+
+    .help-button {
+        display: none;
+    }
+
+    .main {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+    }
+
+    #map {
+        height: 45vh;
+        min-height: 300px;
+        order: 1;
+    }
+
+    .sidebar {
+        position: relative;
+        inset: auto;
+        width: 100%;
+        max-height: none;
+        border-radius: 0;
+        box-shadow: none;
+        order: 2;
+    }
+
+    .sidebar-scroll {
+        overflow: visible;
+        padding: 22px 18px;
+    }
+
+    .map-controls {
+        top: 12px;
+        right: 12px;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div class="app">
+
+    <!-- NAVIGATION -->
+    <header class="topbar">
+
+        <a href="#home" class="brand">
+            <div class="brand-icon">↗</div>
+            <span>Transit<span class="brand-highlight">Ease</span></span>
+        </a>
+
+        <nav class="topnav">
+            <a href="#home">Discover</a>
+            <a href="#routes">Journey Planner</a>
+            <a href="#nearby">Transport</a>
+        </nav>
+
+        <div class="top-right">
+            <div class="city-pill">
+                <span>●</span> Bengaluru, India
+            </div>
+
+            <button class="help-button"
+                onclick="alert('TransitEase helps you discover public transportation locations and travel options.')">
+                About TransitEase
+            </button>
+        </div>
+
+    </header>
+
+    <!-- MAIN -->
+    <main class="main" id="home">
+
+        <!-- MAP -->
+        <div id="map"></div>
+
+        <!-- MAP CONTROLS -->
+        <div class="map-controls">
+
+            <button class="map-control" title="Zoom in"
+                onclick="if(window.map) map.zoomIn()">+</button>
+
+            <button class="map-control" title="Zoom out"
+                onclick="if(window.map) map.zoomOut()">−</button>
+
+            <button class="map-control" title="Reset map"
+                onclick="if(window.map && window.bengaluru) map.setView(bengaluru,12)">⌖</button>
+
+        </div>
+
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
+
+            <div class="sidebar-scroll">
+
+                <div class="welcome">
+                    <span class="welcome-tag">SMART URBAN MOBILITY</span>
+
+                    <h1>Explore your city.<br>Travel smarter.</h1>
+
+                    <p>
+                        Find transport locations, explore travel options
+                        and plan your journey with ease.
+                    </p>
+                </div>
+
+                <!-- ROUTE SEARCH -->
+                <div class="search-box" id="routes">
+
+                    <div class="field">
+                        <div class="field-icon from-icon">●</div>
+
+                        <div class="field-content">
+                            <label for="source">STARTING POINT</label>
+                            <input type="text" id="source"
+                                placeholder="Enter starting location">
+                        </div>
+                    </div>
+
+                    <div class="vertical-line"></div>
+
+                    <div class="field">
+                        <div class="field-icon to-icon">◆</div>
+
+                        <div class="field-content">
+                            <label for="destination">DESTINATION</label>
+                            <input type="text" id="destination"
+                                placeholder="Where do you want to go?">
+                        </div>
+                    </div>
+
+                    <button class="search-button" onclick="findRoute()">
+                        Search Routes <span>↗</span>
+                    </button>
+
+                </div>
+
+                <!-- ROUTE RESULTS -->
+                <div id="route-result"></div>
+
+                <!-- TRANSPORT -->
+                <div class="transport-heading" id="nearby">
+                    <h2>Explore nearby transport</h2>
+                    <p>Find public transport facilities around the city.</p>
+                </div>
+
+                <div class="transport-list">
+
+                    <!-- BUS -->
+                    <div class="transport-option">
+                        <button onclick="showTransport('bus')">
+                            <div class="option-icon bus-bg">🚌</div>
+
+                            <div class="option-info">
+                                <strong>Bus Stops</strong>
+                                <span>Bus terminals & local stops</span>
+                            </div>
+
+                            <span class="option-arrow">›</span>
+                        </button>
+                    </div>
+
+                    <!-- METRO -->
+                    <div class="transport-option">
+                        <button onclick="showTransport('metro')">
+                            <div class="option-icon metro-bg">🚇</div>
+
+                            <div class="option-info">
+                                <strong>Metro Stations</strong>
+                                <span>Rapid city transit</span>
+                            </div>
+
+                            <span class="option-arrow">›</span>
+                        </button>
+                    </div>
+
+                    <!-- RAILWAY -->
+                    <div class="transport-option">
+                        <button onclick="showTransport('train')">
+                            <div class="option-icon rail-bg">🚆</div>
+
+                            <div class="option-info">
+                                <strong>Railway Stations</strong>
+                                <span>Regional & long-distance rail</span>
+                            </div>
+
+                            <span class="option-arrow">›</span>
+                        </button>
+                    </div>
+
+                </div>
+
+                <!-- TRANSPORT RESULTS -->
+                <div id="transport-result"></div>
+
+            </div>
+
+            <!-- FOOTER -->
+            <div class="sidebar-footer">
+                <strong>TransitEase</strong> · Public Transport Assistance
+            </div>
+
+        </aside>
+
+        <div class="map-attribution">
+            © OpenStreetMap contributors
+        </div>
+
+    </main>
+
+</div>
+
+<!-- LEAFLET MAP -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- JAVASCRIPT -->
+<script src="script.js"></script>
+
+</body>
+</html>
