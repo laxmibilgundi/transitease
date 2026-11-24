@@ -1,4 +1,3 @@
-
 /* =========================================================
    TRANSITEASE
    Local Public Transportation Information
@@ -12,6 +11,9 @@
 
 // Bengaluru city center
 const bengaluru = [12.9716, 77.5946];
+
+// User's current location (set when they click "Use my current location")
+let userLocation = null;
 
 
 /* =========================================================
@@ -34,6 +36,7 @@ L.marker(bengaluru)
 // Map layers
 const transportLayer = L.layerGroup().addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
+const userLayer = L.layerGroup().addTo(map);
 
 
 /* =========================================================
@@ -345,7 +348,93 @@ const transportTitles = {
 
 
 /* =========================================================
-   8. NEARBY TRANSPORT SEARCH
+   8. USE MY CURRENT LOCATION
+   ========================================================= */
+
+function locateMe() {
+
+    const result = document.getElementById("transport-result");
+
+    // Browser support check
+    if (!navigator.geolocation) {
+
+        result.innerHTML = `
+            <div class="result-card">
+                <h3>❌ Not Supported</h3>
+                <p>Your browser does not support location access.</p>
+            </div>
+        `;
+
+        return;
+    }
+
+    // Loading message
+    result.innerHTML = `
+        <div class="result-card">
+            <h3>📡 Finding Your Location...</h3>
+            <p>Please allow location access when your browser asks.</p>
+        </div>
+    `;
+
+    navigator.geolocation.getCurrentPosition(
+
+        // Success
+        function (position) {
+
+            userLocation = [
+                position.coords.latitude,
+                position.coords.longitude
+            ];
+
+            userLayer.clearLayers();
+
+            L.circleMarker(userLocation, {
+                radius: 9,
+                color: "#176b48",
+                fillColor: "#176b48",
+                fillOpacity: 0.9
+            })
+                .addTo(userLayer)
+                .bindPopup("<b>You are here</b>")
+                .openPopup();
+
+            map.setView(userLocation, 15);
+
+            result.innerHTML = `
+                <div class="result-card">
+                    <h3>✅ Location Found</h3>
+                    <p>
+                        Now tap Bus Stops, Metro Stations or Railway Stations
+                        to see the ones closest to you.
+                    </p>
+                </div>
+            `;
+        },
+
+        // Error
+        function () {
+
+            result.innerHTML = `
+                <div class="result-card">
+                    <h3>❌ Location Blocked</h3>
+                    <p>
+                        Please allow location access in your browser
+                        and try again.
+                    </p>
+                </div>
+            `;
+        },
+
+        {
+            enableHighAccuracy: true,
+            timeout: 10000
+        }
+    );
+}
+
+
+/* =========================================================
+   9. NEARBY TRANSPORT SEARCH
    ========================================================= */
 
 async function showTransport(type) {
@@ -360,8 +449,10 @@ async function showTransport(type) {
         </div>
     `;
 
-    const lat = bengaluru[0];
-    const lon = bengaluru[1];
+    // Use the user's location if available, otherwise city center
+    const center = userLocation || bengaluru;
+    const lat = center[0];
+    const lon = center[1];
 
     let query = "";
 
@@ -479,7 +570,7 @@ async function showTransport(type) {
 
 
     // ============================================
-    // 9. USE LIVE DATA OR DEMO DATA
+    // 10. USE LIVE DATA OR DEMO DATA
     // ============================================
 
     let foundPlaces = [];
@@ -522,14 +613,14 @@ async function showTransport(type) {
 
 
     // ============================================
-    // 10. CLEAR OLD MARKERS
+    // 11. CLEAR OLD MARKERS
     // ============================================
 
     transportLayer.clearLayers();
 
 
     // ============================================
-    // 11. ADD MARKERS TO MAP
+    // 12. ADD MARKERS TO MAP
     // ============================================
 
     foundPlaces.forEach(place => {
@@ -544,7 +635,7 @@ async function showTransport(type) {
 
 
     // ============================================
-    // 12. ZOOM MAP
+    // 13. ZOOM MAP
     // ============================================
 
     if (foundPlaces.length > 0) {
@@ -561,7 +652,7 @@ async function showTransport(type) {
 
 
     // ============================================
-    // 13. DISPLAY RESULTS
+    // 14. DISPLAY RESULTS
     // ============================================
 
     const title = transportTitles[type];
@@ -580,7 +671,9 @@ async function showTransport(type) {
                 ${
                     isDemo
                     ? "Demo locations are displayed because live transport data was unavailable."
-                    : "Locations retrieved from OpenStreetMap data."
+                    : (userLocation
+                        ? "Locations near you, retrieved from OpenStreetMap data."
+                        : "Locations retrieved from OpenStreetMap data.")
                 }
             </div>
 
@@ -603,7 +696,7 @@ async function showTransport(type) {
 
 
 /* =========================================================
-   14. MAP RESIZE
+   15. MAP RESIZE
    ========================================================= */
 
 window.addEventListener("load", function() {
