@@ -244,8 +244,9 @@ function escapeHTML(text) {
    6. DEMO TRANSPORT LOCATIONS
    ========================================================= */
 
-// Sample Bengaluru locations used when live data is unavailable.
-// These are demonstration locations, not verified live records.
+// Sample Bengaluru locations used only as a last resort when live
+// data cannot be loaded. These are demonstration locations, not
+// verified live records.
 
 const demoLocations = {
 
@@ -434,71 +435,186 @@ function locateMe() {
 
 
 /* =========================================================
-   9. NEARBY TRANSPORT SEARCH
+   9. NEARBY TRANSPORT SEARCH (Overpass / OpenStreetMap)
    ========================================================= */
+
+const OVERPASS_SERVERS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter"
+];
+
+// Small radius first (fast), widen only if too few results
+const SEARCH_RADII = {
+    bus:   [1000, 2500, 5000],
+    metro: [3000, 8000, 15000],
+    train: [5000, 12000, 25000]
+};
+
+function buildQuery(type, radius, lat, lon) {
+
+    const around = `(around:${radius},${lat},${lon})`;
+
+    const filters = {
+        bus: [
+            `["highway"="bus_stop"]`,
+            `["amenity"="bus_station"]`
+        ],
+        metro: [
+            `["railway"="station"]["station"="subway"]`,
+            `["railway"="station"]["network"~"Namma|Bangalore Metro|Bengaluru Metro",i]`,
+            `["public_transport"="station"]["subway"="yes"]`
+        ],
+        train: [
+            `["railway"="station"]["station"!="subway"]["subway"!="yes"]["network"!~"Metro",i]`,
+            `["railway"="halt"]`
+        ]
+    }[type];
+
+    return `[out:json][timeout:25];(` +
+        filters.map(f => `nwr${f}${around};`).join("") +
+        `);out center 200;`;
+}
+
+// Ask all mirrors at the same time and use whichever answers first
+async function fetchOverpass(query, timeoutMs = 25000) {
+
+    const controllers = OVERPASS_SERVERS.map(() => new AbortController());
+
+    const timer = setTimeout(
+        () => controllers.forEach(c => c.abort()),
+        timeoutMs
+    );
+
+    try {
+
+        return await Promise.any(
+            OVERPASS_SERVERS.map(async (server, i) => {
+
+                const response = await fetch(server, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    },
+                    body: "data=" + encodeURIComponent(query),
+                    signal: controllers[i].signal
+                });
+
+                if (!response.ok) {
+                    throw new Error(server + " returned " + response.status);
+                }
+
+                const json = await response.json();
+
+                if (!json || !Array.isArray(json.elements)) {
+                    throw new Error(server + " returned invalid data");
+                }
+
+                // Overloaded servers can reply 200 with an empty list + remark
+                if (json.elements.length === 0 && json.remark) {
+                    throw new Error(server + ": " + json.remark);
+                }
+
+                // Winner found: cancel the other requests
+                controllers.forEach((c, j) => {
+                    if (j !== i) c.abort();
+                });
+
+                return json;
+            })
+        );
+
+    } catch (error) {
+
+        console.warn("All Overpass servers failed:", error.errors || error);
+        throw error;
+
+    } finally {
+
+        clearTimeout(timer);
+
+    }
+}
+
+function parsePlaces(data, center) {
+
+    const byName = new Map();
+
+    data.elements.forEach(place => {
+
+        const lat = place.lat ?? place.center?.lat;
+        const lon = place.lon ?? place.center?.lon;
+        const name = place.tags?.name || place.tags?.["name:en"];
+
+        if (lat == null || lon == null || !name) return;
+
+        const distance = Math.round(map.distance(center, [lat, lon]));
+        const key = name.trim().toLowerCase();
+
+        // Many stops share a name (both sides of a road): keep the closest
+        if (!byName.has(key) || byName.get(key).distance > distance) {
+            byName.set(key, { name: name.trim(), lat, lon, distance });
+        }
+    });
+
+    return [...byName.values()].sort((a, b) => a.distance - b.distance);
+}
+
+async function getNearbyPlaces(type, lat, lon) {
+
+    // Cache successful results for 10 minutes
+    const cacheKey = `te:${type}:${lat.toFixed(3)}:${lon.toFixed(3)}`;
+
+    try {
+        const cached = JSON.parse(sessionStorage.getItem(cacheKey));
+        if (cached && Date.now() - cached.time < 600000) {
+            return cached.value;
+        }
+    } catch (e) {
+        // ignore cache problems
+    }
+
+    const radii = SEARCH_RADII[type];
+    let places = [];
+    let radiusUsed = radii[0];
+
+    for (const radius of radii) {
+
+        const data = await fetchOverpass(buildQuery(type, radius, lat, lon));
+
+        places = parsePlaces(data, [lat, lon]);
+        radiusUsed = radius;
+
+        if (places.length >= 3) break;
+    }
+
+    const value = { places: places.slice(0, 15), radius: radiusUsed };
+
+    if (value.places.length > 0) {
+        try {
+            sessionStorage.setItem(
+                cacheKey,
+                JSON.stringify({ time: Date.now(), value })
+            );
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    return value;
+}
+
+function formatDistance(meters) {
+    return meters < 1000
+        ? meters + " m"
+        : (meters / 1000).toFixed(1) + " km";
+}
 
 async function showTransport(type) {
 
     const result = document.getElementById("transport-result");
 
-    // Loading screen
-    result.innerHTML = `
-        <div class="result-card">
-            <h3>🔍 Finding Nearby Transport...</h3>
-            <p>Please wait while we load transport locations.</p>
-        </div>
-    `;
-
-    // Use the user's location if available, otherwise city center
-    const center = userLocation || bengaluru;
-    const lat = center[0];
-    const lon = center[1];
-
-    let query = "";
-
-    // Bus stop query
-    if (type === "bus") {
-
-        query = `
-        [out:json][timeout:20];
-        (
-          node["highway"="bus_stop"](around:5000,${lat},${lon});
-          node["amenity"="bus_station"](around:5000,${lat},${lon});
-          way["amenity"="bus_station"](around:5000,${lat},${lon});
-        );
-        out center;
-        `;
-
-    }
-
-    // Metro query
-    else if (type === "metro") {
-
-        query = `
-        [out:json][timeout:20];
-        (
-          node["railway"="station"]["station"="subway"](around:10000,${lat},${lon});
-          node["railway"="station"]["subway"="yes"](around:10000,${lat},${lon});
-          node["railway"="subway_entrance"](around:10000,${lat},${lon});
-        );
-        out center;
-        `;
-
-    }
-
-    // Railway query
-    else if (type === "train") {
-
-        query = `
-        [out:json][timeout:20];
-        (
-          node["railway"="station"](around:10000,${lat},${lon});
-          way["railway"="station"](around:10000,${lat},${lon});
-        );
-        out center;
-        `;
-
-    } else {
+    if (!transportTitles[type]) {
 
         result.innerHTML = `
             <div class="result-card">
@@ -509,179 +625,91 @@ async function showTransport(type) {
         return;
     }
 
+    // Loading screen
+    result.innerHTML = `
+        <div class="result-card">
+            <h3>🔍 Finding Nearby Transport...</h3>
+            <p>Searching OpenStreetMap data. This can take a few seconds.</p>
+        </div>
+    `;
 
-    // Overpass servers
-    const servers = [
-        "https://overpass-api.de/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter",
-        "https://overpass.nchc.org.tw/api/interpreter"
-    ];
+    // Use the user's location if available, otherwise city center
+    const center = userLocation || bengaluru;
 
-    let data = null;
-    let lastError = null;
-
-
-    // Try servers one after another
-    for (const server of servers) {
-
-        let controller;
-        let timeoutId;
-
-        try {
-
-            controller = new AbortController();
-
-            timeoutId = setTimeout(() => {
-                controller.abort();
-            }, 12000);
-
-            const response = await fetch(server, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
-                body: "data=" + encodeURIComponent(query),
-                signal: controller.signal
-            });
-
-            if (!response.ok) {
-                throw new Error("Server returned " + response.status);
-            }
-
-            data = await response.json();
-
-            // Successful request
-            break;
-
-        } catch (error) {
-
-            lastError = error;
-            console.warn("Transport API failed:", server, error);
-
-        } finally {
-
-            if (timeoutId) {
-                clearTimeout(timeoutId);
-            }
-
-        }
-
-    }
-
-
-    // ============================================
-    // 10. USE LIVE DATA OR DEMO DATA
-    // ============================================
-
-    let foundPlaces = [];
+    let places = [];
+    let radiusUsed = null;
     let isDemo = false;
 
-    if (data && data.elements && data.elements.length > 0) {
+    try {
 
-        foundPlaces = data.elements
-            .map(place => {
+        const found = await getNearbyPlaces(type, center[0], center[1]);
+        places = found.places;
+        radiusUsed = found.radius;
 
-                const placeLat = place.lat ?? place.center?.lat;
-                const placeLon = place.lon ?? place.center?.lon;
+    } catch (error) {
 
-                const name =
-                    place.tags?.name ||
-                    place.tags?.["name:en"] ||
-                    place.tags?.ref ||
-                    "Unnamed Transport Location";
-
-                return {
-                    name: name,
-                    lat: placeLat,
-                    lon: placeLon
-                };
-
-            })
-            .filter(place =>
-                place.lat != null && place.lon != null
-            );
+        console.warn("Live transport lookup failed:", error);
 
     }
 
-    // If live data failed or returned no results
-    if (foundPlaces.length === 0) {
+    // Last resort only: demo data
+    if (places.length === 0) {
 
-        foundPlaces = demoLocations[type];
         isDemo = true;
 
+        places = demoLocations[type]
+            .map(p => ({
+                ...p,
+                distance: Math.round(map.distance(center, [p.lat, p.lon]))
+            }))
+            .sort((a, b) => a.distance - b.distance);
     }
 
-
-    // ============================================
-    // 11. CLEAR OLD MARKERS
-    // ============================================
-
+    // Map markers
     transportLayer.clearLayers();
 
-
-    // ============================================
-    // 12. ADD MARKERS TO MAP
-    // ============================================
-
-    foundPlaces.forEach(place => {
+    places.forEach(place => {
 
         L.marker([place.lat, place.lon])
             .addTo(transportLayer)
             .bindPopup(
-                "<b>" + escapeHTML(place.name) + "</b>"
+                "<b>" + escapeHTML(place.name) + "</b><br>" +
+                formatDistance(place.distance) + " away"
             );
 
     });
 
+    // Zoom to results (and the search center)
+    const bounds = L.latLngBounds(places.map(p => [p.lat, p.lon]));
+    bounds.extend(center);
 
-    // ============================================
-    // 13. ZOOM MAP
-    // ============================================
+    map.fitBounds(bounds, {
+        padding: [40, 40]
+    });
 
-    if (foundPlaces.length > 0) {
-
-        const bounds = L.latLngBounds(
-            foundPlaces.map(place => [place.lat, place.lon])
-        );
-
-        map.fitBounds(bounds, {
-            padding: [40, 40]
-        });
-
-    }
-
-
-    // ============================================
-    // 14. DISPLAY RESULTS
-    // ============================================
-
-    const title = transportTitles[type];
+    // Results card
+    const note = isDemo
+        ? "Live data could not be loaded, so sample locations are shown."
+        : `Showing the closest ${places.length} within ${formatDistance(radiusUsed)} of ` +
+          (userLocation ? "your location" : "the city centre") +
+          ", from OpenStreetMap data.";
 
     result.innerHTML = `
         <div class="result-card">
 
-            <h3>📍 ${title}</h3>
+            <h3>📍 ${transportTitles[type]}</h3>
 
-            <p>
-                <strong>${foundPlaces.length}</strong>
-                locations displayed on the map.
-            </p>
-
-            <div class="route-note">
-                ${
-                    isDemo
-                    ? "Demo locations are displayed because live transport data was unavailable."
-                    : (userLocation
-                        ? "Locations near you, retrieved from OpenStreetMap data."
-                        : "Locations retrieved from OpenStreetMap data.")
-                }
-            </div>
+            <div class="route-note">${note}</div>
 
             <ul>
-                ${foundPlaces.map(place =>
-                    `<li>${escapeHTML(place.name)}</li>`
+                ${places.map(p =>
+                    `<li>${escapeHTML(p.name)} <span style="color:#778179">· ${formatDistance(p.distance)}</span></li>`
                 ).join("")}
             </ul>
+
+            ${isDemo
+                ? `<button class="search-button" onclick="showTransport('${type}')">Retry</button>`
+                : ""}
 
         </div>
     `;
@@ -691,12 +719,11 @@ async function showTransport(type) {
     } else {
         console.log("Live transport locations displayed.");
     }
-
 }
 
 
 /* =========================================================
-   15. MAP RESIZE
+   10. MAP RESIZE
    ========================================================= */
 
 window.addEventListener("load", function() {
